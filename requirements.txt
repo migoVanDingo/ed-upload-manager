@@ -18,8 +18,8 @@ mypy==1.16.1
 mypy_extensions==1.1.0
 packaging==25.0
 pathspec==0.12.1
-#platform_common @ git+https://${PLATFORM_COMMON_TOKEN}@github.com/migoVanDingo/ed-platform-common@main
--e /Users/bubz/Developer/web-dev/current-projects/ed-platform/ed-platform-common
+platform_common @ git+https://${PLATFORM_COMMON_TOKEN}@github.com/migoVanDingo/ed-platform-common@main
+#-e /Users/bubz/Developer/web-dev/current-projects/ed-platform/ed-platform-common
 platformdirs==4.3.8
 pluggy==1.6.0
 pycodestyle==2.14.0
