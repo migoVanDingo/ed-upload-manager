@@ -1,25 +1,44 @@
 # app/api/router/upload_session_router.py
 from xml.sax import handler
 from fastapi import APIRouter, Depends, Request
+from fastapi.middleware.cors import CORSMiddleware
 from platform_common.logging.logging import get_logger
 from platform_common.utils.service_response import ServiceResponse
 
 
-from app.api.handler.upload_sessions.create_upload_session_handler import (
+from api.handler.create_upload_session_handler import (
     CreateUploadSessionHandler,
 )
-from app.api.handler.upload_sessions.get_upload_session_handler import (
+from api.handler.get_upload_session_handler import (
     GetUploadSessionHandler,
 )
-from app.api.handler.upload_sessions.list_upload_sessions_handler import (
+from api.handler.get_list_upload_session_handler import (
     ListUploadSessionsHandler,
 )
-from app.api.handler.upload_sessions.update_upload_session_handler import (
+from api.handler.update_upload_session_handler import (
     UpdateUploadSessionHandler,
 )
 
 
 router = APIRouter()
+
+ALLOWED_ORIGINS = [
+    "http://localhost:5173",
+    "https://your-frontend.example.com",
+]
+
+router.add_middleware(
+    CORSMiddleware,
+    allow_origins=ALLOWED_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["*"],  # or tighten to specific headers you expect
+    expose_headers=[  # only affects responses from YOUR API, not GCS
+        "Location",
+        "Content-Range",
+        "x-goog-resumable",
+    ],
+)
 logger = get_logger("upload-session")
 
 
