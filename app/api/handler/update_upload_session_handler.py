@@ -5,7 +5,7 @@ from pydantic import BaseModel
 from fastapi import Depends, Request, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from platform_common.db.session import get_async_session
+from platform_common.db.session import get_session
 from platform_common.db.dal.upload_session_dal import UploadSessionDAL
 from platform_common.utils.service_response import ServiceResponse
 
@@ -18,7 +18,7 @@ class UpdateUploadSessionBody(BaseModel):
 
 
 class UpdateUploadSessionHandler:
-    def __init__(self, db: AsyncSession = Depends(get_async_session)):
+    def __init__(self, db: AsyncSession = Depends(get_session)):
         self.db = db
         self.dal = UploadSessionDAL(db)
 

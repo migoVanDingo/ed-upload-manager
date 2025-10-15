@@ -11,7 +11,7 @@ from google.cloud import storage
 
 from platform_common.utils.service_response import ServiceResponse
 from platform_common.utils.generate_id import generate_id
-from platform_common.db.session import get_async_session
+from platform_common.db.session import get_session
 from platform_common.db.dal.upload_session_dal import UploadSessionDAL
 from platform_common.models.upload_session import UploadSession
 
@@ -27,7 +27,7 @@ class CreateUploadSessionBody(BaseModel):
 
 
 class CreateUploadSessionHandler:
-    def __init__(self, db: AsyncSession = Depends(get_async_session)):
+    def __init__(self, db: AsyncSession = Depends(get_session)):
         self.db = db
         self.dal = UploadSessionDAL(db)
         self.storage_client = storage.Client()

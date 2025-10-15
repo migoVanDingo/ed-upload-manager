@@ -6,16 +6,16 @@ from platform_common.logging.logging import get_logger
 from platform_common.utils.service_response import ServiceResponse
 
 
-from api.handler.create_upload_session_handler import (
+from app.api.handler.create_upload_session_handler import (
     CreateUploadSessionHandler,
 )
-from api.handler.get_upload_session_handler import (
+from app.api.handler.get_upload_session_handler import (
     GetUploadSessionHandler,
 )
-from api.handler.get_list_upload_session_handler import (
+from app.api.handler.get_list_upload_session_handler import (
     ListUploadSessionsHandler,
 )
-from api.handler.update_upload_session_handler import (
+from app.api.handler.update_upload_session_handler import (
     UpdateUploadSessionHandler,
 )
 
