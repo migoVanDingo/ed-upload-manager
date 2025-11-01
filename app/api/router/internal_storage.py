@@ -2,7 +2,7 @@
 from fastapi import APIRouter, Request, Depends, Response, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from platform_common.db.session import get_async_session
+from platform_common.db.session import get_session
 from services.gcs_finalize import handle_gcs_finalize_push
 from infra.pubsub_publisher import enqueue_job
 
@@ -12,7 +12,7 @@ router = APIRouter(prefix="/internal/storage", tags=["internal-storage"])
 @router.post("/object-finalized")
 async def object_finalized(
     request: Request,
-    db: AsyncSession = Depends(get_async_session),
+    db: AsyncSession = Depends(get_session),
 ):
     try:
         body = await request.json()

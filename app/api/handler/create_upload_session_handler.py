@@ -78,6 +78,6 @@ class CreateUploadSessionHandler:
             "objectKey": object_key,
             "uploadUrl": upload_url,
         }
-        return ServiceResponse.success(
-            data
+        return ServiceResponse(
+            message="Upload session created", status_code=201, data=data
         )  # adjust if your ServiceResponse API differs

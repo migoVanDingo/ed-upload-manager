@@ -22,23 +22,6 @@ from app.api.handler.update_upload_session_handler import (
 
 router = APIRouter()
 
-ALLOWED_ORIGINS = [
-    "http://localhost:5173",
-    "https://your-frontend.example.com",
-]
-
-router.add_middleware(
-    CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,
-    allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["*"],  # or tighten to specific headers you expect
-    expose_headers=[  # only affects responses from YOUR API, not GCS
-        "Location",
-        "Content-Range",
-        "x-goog-resumable",
-    ],
-)
 logger = get_logger("upload-session")
 
 
