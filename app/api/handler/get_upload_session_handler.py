@@ -1,5 +1,5 @@
 # app/api/handler/upload_sessions/get_upload_session_handler.py
-from __future__ import annotations
+# from __future__ import annotations
 from typing import Optional
 from fastapi import Depends, Request, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession

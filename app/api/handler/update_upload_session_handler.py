@@ -1,5 +1,5 @@
 # app/api/handler/upload_sessions/update_upload_session_handler.py
-from __future__ import annotations
+# from __future__ import annotations
 from typing import List, Optional
 from pydantic import BaseModel
 from fastapi import Depends, Request, HTTPException

@@ -1,5 +1,5 @@
 # ed_upload_manager/services/gcs_finalize_service.py
-from __future__ import annotations
+# from __future__ import annotations
 import base64
 import json
 from typing import Any, Awaitable, Callable, Dict, Optional
