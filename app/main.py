@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-
+from platform_common.middleware.request_id_middleware import RequestIDMiddleware
+from platform_common.exception_handling.handlers import add_exception_handlers
 from app.api.controller.health_check import router as health_router
 from strawberry.fastapi import GraphQLRouter
 from app.api.router.upload_session_router import router as upload_session_router
@@ -22,8 +23,11 @@ app.add_middleware(
     ],
 )
 
+app.add_middleware(RequestIDMiddleware)
+add_exception_handlers(app)
+
 # REST endpoints
 app.include_router(health_router, prefix="/health", tags=["Health"])
 app.include_router(
-    upload_session_router, prefix="/upload-sessions", tags=["Upload Sessions"]
+    upload_session_router, prefix="/api/upload/session", tags=["Upload Sessions"]
 )

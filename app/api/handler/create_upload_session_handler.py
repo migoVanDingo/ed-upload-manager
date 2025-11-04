@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field as PydField
 from fastapi import Depends, Request, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from google.cloud import storage
-
+from platform_common.logging.logging import get_logger
 from platform_common.utils.service_response import ServiceResponse
 from platform_common.utils.generate_id import generate_id
 from platform_common.db.session import get_session
@@ -16,6 +16,7 @@ from platform_common.db.dal.upload_session_dal import UploadSessionDAL
 from platform_common.models.upload_session import UploadSession
 
 RAW_BUCKET_ENV = "RAW_BUCKET"  # e.g. ed-platform-raw
+logger = get_logger("create_upload_session_handler")
 
 
 class CreateUploadSessionBody(BaseModel):
@@ -36,9 +37,11 @@ class CreateUploadSessionHandler:
             raise RuntimeError(f"{RAW_BUCKET_ENV} env var is required")
 
     async def do_process(self, request: Request) -> ServiceResponse:
+        logger.info(f"[{__class__.__name__}] Processing create upload session request")
         try:
             body = CreateUploadSessionBody(**(await request.json()))
         except Exception as e:
+            logger.error(f"Error parsing request body: {e}")
             raise HTTPException(status_code=400, detail=f"Invalid body: {e}")
 
         upload_id = generate_id("UPLD")
@@ -46,6 +49,7 @@ class CreateUploadSessionHandler:
             f"raw/datastore={body.datastore_id}/uploads/{upload_id}/{body.filename}"
         )
 
+        logger.info(f"[{__class__.__name__}] Created upload session: {upload_id}")
         # Persist session row first (initiated)
         session_obj = UploadSession(
             id=upload_id,
@@ -59,6 +63,7 @@ class CreateUploadSessionHandler:
         )
         await self.dal.save(session_obj)
 
+        logger.info(f"[{__class__.__name__}] Session saved")
         # Create a GCS resumable upload session
         bucket = self.storage_client.bucket(self.raw_bucket)
         blob = bucket.blob(object_key)
@@ -72,12 +77,13 @@ class CreateUploadSessionHandler:
                 "tags": json.dumps(body.tags or []),
             },
         )
-
+        logger.info(f"[{__class__.__name__}] Created GCS upload session URL")
         data = {
             "uploadId": upload_id,
             "objectKey": object_key,
             "uploadUrl": upload_url,
         }
+        logger.info(f"[{__class__.__name__}] Response data {data}")
         return ServiceResponse(
             message="Upload session created", status_code=201, data=data
         )  # adjust if your ServiceResponse API differs
