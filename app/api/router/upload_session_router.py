@@ -8,6 +8,7 @@ from platform_common.utils.service_response import ServiceResponse
 
 
 from app.api.handler.create_upload_session_handler import (
+    CreateUploadSessionBody,
     CreateUploadSessionHandler,
 )
 from app.api.handler.get_upload_session_handler import (
@@ -44,12 +45,10 @@ async def get_upload_session(
 
 @router.post("/")
 async def create_upload_session(
-    datastore_id: str = Form(None),
-    files: List[UploadFile] = File(...),
-    tags: List[str] = Form([]),
+    body: CreateUploadSessionBody,
     handler: CreateUploadSessionHandler = Depends(CreateUploadSessionHandler),
 ) -> ServiceResponse:
-    return await handler.do_process(datastore_id, tags, files)
+    return await handler.do_process(body.datastore_id, body.tags, body.files)
 
 
 @router.put("/{upload_id}")

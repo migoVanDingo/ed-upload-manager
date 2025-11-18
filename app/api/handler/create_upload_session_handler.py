@@ -1,13 +1,19 @@
 # ------------------------------------------------------------
 # app/api/handler/upload_sessions/create_upload_session_handler.py
-# from __future__ import annotations
 import os
 import json
+import datetime as dt
 from typing import List, Optional, Any
+from urllib.parse import urlparse, parse_qs
+
 from pydantic import BaseModel, Field as PydField
-from fastapi import Depends, HTTPException, UploadFile, File
+from fastapi import Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from google.cloud import storage
+from google.auth.transport.requests import AuthorizedSession
+from google.auth import default as google_auth_default
+
 from platform_common.logging.logging import get_logger
 from platform_common.errors.base import PlatformError
 from platform_common.utils.service_response import ServiceResponse
@@ -23,21 +29,23 @@ RAW_BUCKET_ENV = (
 logger = get_logger("create_upload_session_handler")
 
 
+# ---------- Request/DTOs ----------
+class FileSpec(BaseModel):
+    client_token: Optional[str] = None  # optional token from client to correlate
+    filename: str
+    content_type: Optional[str] = None
+    size_bytes: Optional[int] = None
+    crc32c: Optional[str] = None  # base64-encoded CRC32C (optional, nice-to-have)
+
+
 class CreateUploadSessionBody(BaseModel):
     datastore_id: str
-    files: List[dict]
+    files: List[FileSpec]
     tags: Optional[List[str]] = PydField(default_factory=list)
 
 
+# ---------- Helpers ----------
 def _normalize_bucket_and_prefix(raw: str) -> tuple[str, str]:
-    """
-    Accepts:
-      - "ed-lakehouse-test"
-      - "gs://ed-lakehouse-test"
-      - "gs://ed-lakehouse-test/raw"
-      - "gs://ed-lakehouse-test/raw/extra"
-    Returns: (bucket_name, prefix_without_leading_trailing_slashes)
-    """
     if raw.startswith("gs://"):
         raw = raw[5:]
     parts = raw.split("/", 1)
@@ -47,7 +55,6 @@ def _normalize_bucket_and_prefix(raw: str) -> tuple[str, str]:
 
 
 def _normalize_tags(raw: Any) -> list[str]:
-    # If your route already declares tags: list[str] = Form([]), this will just pass-through.
     if isinstance(raw, list):
         return [str(x) for x in raw]
     if isinstance(raw, (bytes, bytearray)):
@@ -65,11 +72,11 @@ def _normalize_tags(raw: Any) -> list[str]:
     return [str(raw)]
 
 
+# ---------- Handler ----------
 class CreateUploadSessionHandler:
     def __init__(self, db: AsyncSession = Depends(get_session)):
         self.db = db
         self.dal = UploadSessionDAL(db)
-        self.storage_client = storage.Client()
 
         raw_bucket_env = os.getenv(RAW_BUCKET_ENV)
         if not raw_bucket_env:
@@ -78,98 +85,137 @@ class CreateUploadSessionHandler:
         self.bucket_name, self.base_prefix = _normalize_bucket_and_prefix(
             raw_bucket_env
         )
+        if not self.base_prefix:
+            self.base_prefix = "raw"
         logger.info(
             "GCS config: bucket=%s base_prefix=%s",
             self.bucket_name,
             self.base_prefix or "(none)",
         )
 
-    def infer_content_type(self, f: UploadFile) -> str:
-        return (
-            getattr(f, "content_type", None)
-            or getattr(f, "mimetype", None)
-            or (
-                getattr(f, "headers", {}).get("Content-Type")
-                if hasattr(f, "headers")
-                else None
-            )
-            or "application/octet-stream"
+        # Storage client (for bucket existence checks, optional)
+        self.storage_client = storage.Client()
+
+        # Authorized session for calling the JSON API to INITIATE resumable uploads
+        creds, _ = google_auth_default(
+            scopes=["https://www.googleapis.com/auth/devstorage.read_write"]
         )
+        self.authed = AuthorizedSession(creds)
+
+    def _infer_content_type(self, spec: FileSpec) -> str:
+        return spec.content_type or "application/octet-stream"
+
+    def _object_key_for(self, datastore_id: str, upload_id: str, filename: str) -> str:
+        safe_name = (filename or "unnamed").replace(" ", "_")
+        parts = [
+            self.base_prefix,  # may be ""
+            f"datastore",
+            datastore_id,
+            f"session",
+            upload_id,
+            f"{safe_name}",
+        ]
+        return "/".join(p for p in parts if p)
+
+    def _initiate_resumable(
+        self, bucket: str, object_key: str, ctype: str, size_bytes: Optional[int]
+    ) -> str:
+        """
+        Initiate a GCS resumable upload and return the session URL (Location header).
+        Client will upload directly to this URL with chunked PUTs and Content-Range.
+        """
+        endpoint = f"https://storage.googleapis.com/upload/storage/v1/b/{bucket}/o"
+        params = {"uploadType": "resumable", "name": object_key}
+
+        headers = {
+            "X-Upload-Content-Type": ctype,
+        }
+        if size_bytes is not None:
+            headers["X-Upload-Content-Length"] = str(size_bytes)
+
+        # You can add "X-Goog-Hash": "crc32c=<base64crc>" if you want strict integrity.
+        resp = self.authed.post(endpoint, params=params, headers=headers)
+        if resp.status_code not in (200, 201):
+            logger.error(
+                "Failed to initiate resumable upload: %s %s",
+                resp.status_code,
+                resp.text,
+            )
+            raise HTTPException(502, "Could not initiate upload with GCS")
+
+        upload_url = resp.headers.get("Location")
+        if not upload_url:
+            raise HTTPException(502, "GCS did not return a resumable session URL")
+        return upload_url
 
     async def do_process(self, datastore_id, tags, files) -> ServiceResponse:
         try:
             logger.info(
-                "[%s] Processing create upload session request", __class__.__name__
+                "[%s] Processing create upload session (resumable URLs)",
+                __class__.__name__,
             )
-
-            # Optional: confirm datastore exists if you have FK constraints
-            # (uncomment if needed)
-            # from sqlmodel import select
-            # from platform_common.models.datastore import Datastore
-            # res = await self.db.execute(
-            #     select(Datastore).where(Datastore.id == datastore_id, Datastore.is_active == True)
-            # )
-            # if not res.scalar_one_or_none():
-            #     raise HTTPException(404, f"Datastore {datastore_id} not found")
+            # Optional: verify bucket exists / perms
+            _ = self.storage_client.bucket(self.bucket_name)
 
             tags = _normalize_tags(tags)
 
-            uploaded = []
-            bucket = self.storage_client.bucket(self.bucket_name)
+            out = []
 
-            for f in files:
-                logger.info("Processing file: %s (%s)", f.filename, f.content_type)
-
+            for spec in files:
+                logger.info(f"Processing file spec: {spec}")
                 upload_id = generate_id("UPLD")
-                ts = get_current_epoch()
+                object_key = self._object_key_for(
+                    datastore_id, upload_id, spec.filename
+                )
+                ctype = self._infer_content_type(spec)
 
-                safe_name = (f.filename or "unnamed").replace(" ", "_")
-                # object key: <prefix>/org=<datastore_id>/<id>_<ts>_<filename>
-                key_parts = [
-                    self.base_prefix,  # can be ""
-                    f"org={datastore_id}",
-                    f"{upload_id}_{ts}_{safe_name}",
-                ]
-                object_key = "/".join(p for p in key_parts if p)
-
-                # size (UploadFile has no .size)
-                f.file.seek(0, os.SEEK_END)
-                size_estimate = f.file.tell()
-                f.file.seek(0)
-
-                ctype = self.infer_content_type(f)
-
-                # 1) insert upload_session row
+                # 1) Create UploadSession row (no bytes uploaded yet)
                 session_row = UploadSession(
                     id=upload_id,
                     datastore_id=datastore_id,
-                    filename=f"{ts}_{f.filename}",
+                    filename=spec.filename,
                     content_type=ctype,
-                    size_estimate=size_estimate,
+                    size_estimate=spec.size_bytes,
                     tags=tags,
                     object_key=object_key,
-                    status="initiated",
+                    status="authorized",  # or "initiated"
                 )
                 await self.dal.save(session_row)
                 logger.info(
                     "[%s] Created upload session: %s", __class__.__name__, upload_id
                 )
 
-                # 2) upload to GCS (ensure stream starts from 0)
-                blob = bucket.blob(object_key)
-                blob.upload_from_file(f.file, content_type=ctype, rewind=True)
-                logger.info(
-                    "[%s] File uploaded to GCS: %s", __class__.__name__, object_key
+                # 2) Initiate resumable upload (server-authenticated) → session URL for the browser
+                upload_url = self._initiate_resumable(
+                    bucket=self.bucket_name,
+                    object_key=object_key,
+                    ctype=ctype,
+                    size_bytes=spec.size_bytes,
+                )
+                qs = parse_qs(urlparse(upload_url).query)
+                gcs_session_id = (qs.get("upload_id") or [None])[0]
+                logger.info("GCS resumable Location: %s", upload_url)
+                logger.info("GCS resumable session id: %s", gcs_session_id)
+
+                out.append(
+                    {
+                        "upload_id": upload_id,
+                        "client_token": spec.client_token,
+                        "object_key": object_key,
+                        "upload_url": upload_url,  # use this verbatim on the client
+                        "gcs_session_id": gcs_session_id,  # optional, for curl/debug
+                        "content_type": ctype,
+                        "suggested_chunk_bytes": 8 * 1024 * 1024,
+                    }
                 )
 
-                uploaded.append({"upload_id": upload_id, "object_key": object_key})
-
-            logger.info("[%s] Uploaded files %s", __class__.__name__, uploaded)
             return ServiceResponse(
-                message="Upload session created", status_code=201, data=uploaded
+                message="Upload sessions created", status_code=201, data=out
             )
+        except HTTPException:
+            raise
         except Exception as e:
-            logger.error("Error in CreateUploadSessionHandler: %s", str(e))
+            logger.exception("Error in CreateUploadSessionHandler: %s", str(e))
             raise PlatformError(
                 status_code=500, message=f"Internal server error: {str(e)}"
             ) from e
