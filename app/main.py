@@ -1,5 +1,8 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
+# app/main.py or app/__init__.py (wherever FastAPI app is defined)
+import platform_common.models  # noqa: F401  -- side-effect import to register all models
 from platform_common.middleware.request_id_middleware import RequestIDMiddleware
 from platform_common.exception_handling.handlers import add_exception_handlers
 from app.api.controller.health_check import router as health_router
