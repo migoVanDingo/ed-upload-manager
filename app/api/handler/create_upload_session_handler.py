@@ -5,6 +5,7 @@ import json
 import datetime as dt
 from typing import List, Optional, Any
 from urllib.parse import urlparse, parse_qs
+from app.api.interface.abstract_handler import AbstractHandler
 
 from pydantic import BaseModel, Field as PydField
 from fastapi import Depends, HTTPException
@@ -19,6 +20,7 @@ from platform_common.errors.base import PlatformError
 from platform_common.utils.service_response import ServiceResponse
 from platform_common.utils.generate_id import generate_id
 from platform_common.db.session import get_session
+from platform_common.db.dependencies.get_dal import get_dal
 from platform_common.db.dal.upload_session_dal import UploadSessionDAL
 from platform_common.db.dal.file_dal import FileDAL
 from platform_common.models.upload_session import UploadSession
@@ -75,11 +77,16 @@ def _normalize_tags(raw: Any) -> list[str]:
 
 
 # ---------- Handler ----------
-class CreateUploadSessionHandler:
-    def __init__(self, db: AsyncSession = Depends(get_session)):
-        self.db = db
-        self.dal = UploadSessionDAL(db)
-        self.file_dal = FileDAL(db)
+class CreateUploadSessionHandler(AbstractHandler):
+    def __init__(
+        self,
+        session_dal: UploadSessionDAL = Depends(get_dal(UploadSessionDAL)),
+        file_dal: FileDAL = Depends(get_dal(FileDAL)),
+    ):  # , db: AsyncSession = Depends(get_session)
+        super().__init__()
+        # self.db = db
+        self.session_dal = session_dal
+        self.file_dal = file_dal
 
         raw_bucket_env = os.getenv(RAW_BUCKET_ENV)
         if not raw_bucket_env:
@@ -199,7 +206,7 @@ class CreateUploadSessionHandler:
                 tags=tags,
                 status="authorized",  # or "initiated"
             )
-            await self.dal.save(session_row)
+            await self.session_dal.save(session_row)
             logger.info(
                 "[%s] Created upload session: %s", __class__.__name__, session_id
             )
@@ -219,7 +226,7 @@ class CreateUploadSessionHandler:
                     filename=spec.filename,
                     content_type=ctype,
                     size=spec.size_bytes or 0,  # size is required; 0 if unknown
-                    status="authorized",  # pending upload/processing
+                    status="pending_upload",  # pending upload/processing
                     meta={},
                     upload_session_id=session_id,
                 )
