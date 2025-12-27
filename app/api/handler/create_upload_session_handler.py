@@ -225,9 +225,16 @@ class CreateUploadSessionHandler(AbstractHandler):
                     storage_provider="gcs",
                     filename=spec.filename,
                     content_type=ctype,
-                    size=spec.size_bytes or 0,  # size is required; 0 if unknown
-                    status="pending_upload",  # pending upload/processing
-                    meta={},
+                    size=spec.size_bytes or 0,
+                    status="pending_upload",
+                    meta={
+                        "tags": tags,  # 👈 store tags on the file
+                        **(
+                            {"clientToken": spec.client_token}
+                            if spec.client_token
+                            else {}
+                        ),
+                    },
                     upload_session_id=session_id,
                 )
 
